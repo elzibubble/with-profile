@@ -1,0 +1,145 @@
+#!/bin/bash
+
+help() {
+	cat <<EOT
+with-profile [-p|--profile PROFILE] [-q|--quiet] command args
+
+  Will run 'command profile-args args', using the currently active profile if one is not specified.
+  With --quiet, only command output is shown.
+
+with-profile help
+
+  This help.
+
+with-profile show command
+
+  Shows the contents of the active profile and lists all profiles.
+
+with-profile create PROFILE command [args]
+
+  Creates or overwrites PROFILE.
+
+with-profile switch PROFILE command
+
+  Sets PROFILE as the active profile.
+
+with-profile delete PROFILE command
+
+  Deletes PROFILE.
+EOT
+	exit
+}
+
+ACTION='run'
+PROFILE=""
+QUIET=""
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+	key="$1"
+
+	case "$key" in
+	help|--help)
+		help;;
+	-p|--profile)
+		PROFILE="$2"
+		shift 2;;
+	c|create)
+		ACTION='create'
+		PROFILE="$2"
+		shift 2
+		;;
+	s|switch)
+		ACTION='switch'
+		shift
+		if [[ $# -ge 1 ]]; then
+			PROFILE="$1"
+			shift
+		else
+			PROFILE="default"
+		fi
+		;;
+	d|delete)
+		ACTION='delete'
+		PROFILE="$2"
+		shift 2;;
+	show)
+		ACTION='show'
+		shift;;
+	-q|--quiet)
+		QUIET=1
+		shift;;
+	--)
+		shift
+		POSITIONAL+=$*
+		;;
+	*)
+		POSITIONAL+=("$1") # save it in an array for later
+		shift;;
+	esac
+done
+
+info() {
+	if [[ -z "$QUIET" ]]; then
+		echo "$@"
+	fi
+}
+warn() {
+	echo "$@" 1>&2
+}
+
+CMD=${POSITIONAL[0]}
+if [[ -z "$CMD" ]]; then
+	help
+fi
+POSITIONAL=${POSITIONAL[@]:1}
+
+CONFDIR="$HOME/.withprofiles"
+CMDDIR="$CONFDIR/$CMD"
+mkdir -p "$CMDDIR"
+
+if [[ "$ACTION" == "show" && -n "$PROFILE" ]]; then
+	warn "Ignoring --profile"
+fi
+PROFILEFN="$CMDDIR/$PROFILE"
+ACTIVEFN="$CMDDIR/active-profile"
+
+case "$ACTION" in
+create)
+	echo $POSITIONAL > "$PROFILEFN"
+	if [[ ! -f "$ACTIVEFN" ]]; then
+		info "Setting active"
+		cp "$PROFILEFN" "$ACTIVEFN"
+	fi
+	;;
+switch)
+	cp "$PROFILEFN" "$ACTIVEFN"
+	cat "$ACTIVEFN"
+	;;
+delete)
+	info "Deleting $PROFILE: $(cat "$PROFILEFN")"
+	rm "$PROFILEFN"
+	;;
+show)
+	if [[ -f "$ACTIVEFN" ]]; then
+        echo -n "Active profile: "
+		cat "$ACTIVEFN"
+	else
+		echo "No profile active"
+	fi
+    echo "Other profiles:"
+    for X in $(ls "$CMDDIR" | grep -v "active-profile"); do
+        echo "  $X"
+    done
+	;;
+run)
+	if [[ -n "$PROFILE" ]]; then
+		PROF_ARGS=$(cat "$PROFILEFN")
+	else
+		PROF_ARGS=$(cat "$ACTIVEFN")
+	fi
+	info $CMD / $PROF_ARGS / $POSITIONAL
+	"$CMD" $PROF_ARGS $POSITIONAL
+	;;
+*)
+	err 'Unrecognised ACTION'
+esac
